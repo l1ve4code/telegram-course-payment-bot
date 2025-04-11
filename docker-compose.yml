@@ -1,0 +1,14 @@
+services:
+  discount-card-bot:
+    container_name: course-payment-bot
+    build: .
+    network_mode: host
+    environment:
+      - BOT_TOKEN=YOUR_BOT_TOKEN
+      - YOOKASSA_ID=YOUR_YOOKASSA_ID
+      - YOOKASSA_KEY=YOUR_YOOKASSA_KEY
+      - YOOKASSA_RETURN_URL=YOUR_YOOKASSA_RETURN_URL
+      - ADMIN_PASSWORD=YOUR_ADMIN_PASSWORD
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
