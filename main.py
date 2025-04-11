@@ -17,6 +17,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+PRODUCTS = {
+    "basic": {
+        "id": 1,
+        "name": "🔥 Основной тариф",
+        "price": 6000,
+        "description": "Доступ к курсу 'Как найти свою Любовь?', 21 день"
+    },
+    "individual": {
+        "id": 2,
+        "name": "💖 Специальный тариф",
+        "price": 39000,
+        "description": "Доступ к курсу 'Как найти свою Любовь?', 40 дней"
+    }
+}
+
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 YOOKASSA_ID = os.getenv('YOOKASSA_ID')
 YOOKASSA_KEY = os.getenv('YOOKASSA_KEY')
@@ -163,11 +178,15 @@ def get_stats() -> dict:
 
 
 # ========== YOOKASSA ========== #
-def create_payment(amount: float, chat_id: int):
+def create_payment(product_id: str, chat_id: int):
+    product = PRODUCTS.get(product_id)
+    if not product:
+        raise ValueError("Неизвестный товар")
+
     id_key = str(uuid.uuid4())
     payment = Payment.create({
         'amount': {
-            'value': amount,
+            'value': product["price"],
             'currency': 'RUB'
         },
         'confirmation': {
@@ -176,9 +195,10 @@ def create_payment(amount: float, chat_id: int):
         },
         'capture': True,
         'metadata': {
-            'chat_id': chat_id
+            'chat_id': chat_id,
+            'product_id': product_id
         },
-        'description': 'Доступ к курсу "Как встретить Свою любовь?"'
+        'description': product["description"]
     }, id_key)
 
     return payment.confirmation.confirmation_url, payment.id
@@ -240,26 +260,51 @@ async def buy_handler(message: Message):
     user = message.from_user
 
     user_info = get_user_info(user.id)
-    if user_info is None or not user_info[1]:
+    if not user_info or not user_info[1]:
         await message.answer("Сначала поделитесь номером телефона!")
         return
 
-    payment_url, payment_id = create_payment(1, message.chat.id)
-    add_payment(user.id, payment_id, 1)
+    builder = InlineKeyboardBuilder()
+    for product_id, product in PRODUCTS.items():
+        builder.add(types.InlineKeyboardButton(
+            text=f"{product['name']} - {product['price']}₽",
+            callback_data=f"product_{product_id}"
+        ))
+    builder.adjust(1)
+
+    await message.answer(
+        "🎁 Выберите товар для покупки:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith('product_'))
+async def product_selection_handler(callback: types.CallbackQuery):
+    product_id = callback.data.split('_')[1]
+    product = PRODUCTS.get(product_id)
+
+    if not product:
+        await callback.answer("Товар не найден")
+        return
+
+    payment_url, payment_id = create_payment(product_id, callback.message.chat.id)
+    add_payment(callback.from_user.id, payment_id, product["price"])
 
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(
-        text='💳 Оплатить курс',
+        text='💳 Оплатить',
         url=payment_url
     ))
 
-    await message.answer(
-        "🔹 *Счет на оплату курса сформирован!*\n\n"
-        "После успешной оплаты вы автоматически получите уведомление, "
-        "и с вами свяжутся организаторы курса.",
+    await callback.message.edit_text(
+        f"🔹 *{product['name']}*\n\n"
+        f"*Цена:* {product['price']}₽\n"
+        f"*Описание:* {product['description']}\n\n"
+        "Ссылка для оплаты:",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
+    await callback.answer()
 
 
 @router.message(Command('stats'))
