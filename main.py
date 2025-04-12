@@ -338,19 +338,19 @@ async def users_handler(message: Message):
         await message.answer("Нет данных о пользователях.")
         return
 
-    response = "📋 *Список пользователей*\n\n"
+    response = "📋 <b>Список пользователей</b>\n\n"
     for user in users:
         user_id, username, phone, amount, status = user
         response += (
-            f"👤 ID: {user_id}\n"
-            f"├ Логин: @{username or '—'}\n"
-            f"├ Телефон: {phone or '—'}\n"
-            f"├ Сумма: {amount or '—'} руб.\n"
-            f"└ Статус: {status or '—'}\n\n"
+            f"👤 <b>ID:</b> {user_id}\n"
+            f"├ <b>Логин:</b> @{username or '—'}\n"
+            f"├ <b>Телефон:</b> {phone or '—'}\n"
+            f"├ <b>Сумма:</b> {amount or '—'} руб.\n"
+            f"└ <b>Статус:</b> {status or '—'}\n\n"
         )
 
     for i in range(0, len(response), 4000):
-        await message.answer(response[i:i + 4000], parse_mode="Markdown")
+        await message.answer(response[i:i + 4000], parse_mode="HTML")
 
 
 # ========== BACKGROUND TASKS ========== #
