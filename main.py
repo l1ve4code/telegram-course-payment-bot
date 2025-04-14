@@ -222,15 +222,17 @@ def create_payment(user: dict, product_id: str, chat_id: int):
                 'email': user["email"],
                 'phone': user["phone"]
             },
-            'items': {
+            'items': [{
                 'description': product["description"],
                 'amount': {
                     'value': product["price"],
                     'currency': 'RUB'
                 },
-                'vat_code': 1,
-                'quantity': 1
-            }
+                'vat_code': '1',
+                'quantity': '1.00',
+                'payment_subject': 'service',
+                'payment_mode': 'full_prepayment',
+            }]
         }
     }, id_key)
 
