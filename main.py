@@ -13,6 +13,13 @@ from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+
+
+class Form(StatesGroup):
+    waiting_for_email = State()
 
 
 logging.basicConfig(level=logging.INFO)
@@ -47,7 +54,7 @@ yookassa.Configuration.account_id = YOOKASSA_ID
 yookassa.Configuration.secret_key = YOOKASSA_KEY
 
 bot = Bot(BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
@@ -237,7 +244,7 @@ def check_payment(payment_id: str):
 
 # ========== HANDLERS ========== #
 @router.message(Command(commands=['start']))
-async def start_handler(message: Message):
+async def start_handler(message: Message, state: FSMContext):
     user = message.from_user
     add_user(user.id, user.username)
 
@@ -262,9 +269,11 @@ async def start_handler(message: Message):
 `example@mail.ru`
     """, parse_mode="Markdown")
 
+    await state.set_state(Form.waiting_for_email)
 
-@router.message(F.text)
-async def email_handler(message: Message):
+
+@router.message(Form.waiting_for_email, F.text)
+async def email_handler(message: Message, state: FSMContext):
     email = message.text.strip()
 
     if not EMAIL_REGEX.fullmatch(email):
@@ -278,6 +287,7 @@ async def email_handler(message: Message):
         return
 
     update_user_email(message.from_user.id, email)
+    await state.clear()
 
     markup = ReplyKeyboardMarkup(
         keyboard=[
