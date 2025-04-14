@@ -244,6 +244,19 @@ def check_payment(payment_id: str):
     return payment.status, payment.metadata
 
 
+def check_product_limit(product_id: str, max_limit: int = 5) -> bool:
+    if product_id != "individual":
+        return True
+
+    count = execute_db_query(
+        """SELECT COUNT(*) FROM payments 
+           WHERE product_id = ? AND payment_status = 'succeeded'""",
+        (product_id,),
+        fetch=True
+    )
+    return count[0][0] < max_limit if count else True
+
+
 # ========== HANDLERS ========== #
 @router.message(Command(commands=['start']))
 async def start_handler(message: Message, state: FSMContext):
@@ -341,6 +354,11 @@ async def buy_handler(message: Message):
     builder.adjust(1)
 
     await message.answer(
+        "🤩 Осталось мало мест на 💖 *Специальный тариф*!\nПоторопитесь купить 🏃",
+        parse_mode='Markdown'
+    )
+
+    await message.answer(
         "🎁 Выберите товар для покупки:",
         reply_markup=builder.as_markup()
     )
@@ -355,6 +373,13 @@ async def product_selection_handler(callback: types.CallbackQuery):
 
     if not product:
         await callback.answer("Товар не найден")
+        return
+
+    if not check_product_limit(product_id):
+        await callback.answer(
+            "❌ Извините, все места уже заняты!",
+            show_alert=True
+        )
         return
 
     user_info = get_user_info(user_id)
