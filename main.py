@@ -1,3 +1,4 @@
+import re
 import os
 import uuid
 import asyncio
@@ -21,16 +22,18 @@ PRODUCTS = {
     "basic": {
         "id": 1,
         "name": "🔥 Основной тариф",
-        "price": 6000,
+        "price": 6000.00,
         "description": "Доступ к курсу 'Как найти свою Любовь?', 21 день"
     },
     "individual": {
         "id": 2,
         "name": "💖 Специальный тариф",
-        "price": 39000,
+        "price": 39000.00,
         "description": "Доступ к курсу 'Как найти свою Любовь?', 40 дней"
     }
 }
+
+EMAIL_REGEX = re.compile(r"[^@]+@[^@]+\.[^@]+")
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 YOOKASSA_ID = os.getenv('YOOKASSA_ID')
@@ -63,6 +66,7 @@ def init_db():
                 user_id INTEGER UNIQUE,
                 username TEXT,
                 phone TEXT,
+                email TEXT,
                 registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -106,10 +110,17 @@ def execute_db_query(query: str, params: tuple = (), fetch: bool = False):
             conn.close()
 
 
-def add_user(user_id: int, username: str, phone: str = None):
+def add_user(user_id: int, username: str, phone: str = None, email: str = None):
     execute_db_query(
-        "INSERT OR IGNORE INTO users (user_id, username, phone) VALUES (?, ?, ?)",
-        (user_id, username, phone)
+        "INSERT OR IGNORE INTO users (user_id, username, phone, email) VALUES (?, ?, ?, ?)",
+        (user_id, username, phone, email)
+    )
+
+
+def update_user_email(user_id: int, email: str):
+    execute_db_query(
+        "UPDATE users SET email = ? WHERE user_id = ?",
+        (email, user_id)
     )
 
 
@@ -136,7 +147,7 @@ def update_payment_status(payment_id: str, status: str):
 
 def get_user_info(user_id: int) -> Optional[Tuple]:
     result = execute_db_query(
-        """SELECT u.username, u.phone, 
+        """SELECT u.username, u.phone, u.email,
            p.amount, p.payment_status 
            FROM users u LEFT JOIN payments p ON u.user_id = p.user_id 
            WHERE u.user_id = ?""",
@@ -178,7 +189,7 @@ def get_stats() -> dict:
 
 
 # ========== YOOKASSA ========== #
-def create_payment(product_id: str, chat_id: int):
+def create_payment(user: dict, product_id: str, chat_id: int):
     product = PRODUCTS.get(product_id)
     if not product:
         raise ValueError("Неизвестный товар")
@@ -198,7 +209,22 @@ def create_payment(product_id: str, chat_id: int):
             'chat_id': chat_id,
             'product_id': product_id
         },
-        'description': product["description"]
+        'description': product["description"],
+        'receipt': {
+            'customer': {
+                'email': user["email"],
+                'phone': user["phone"]
+            },
+            'items': {
+                'description': product["description"],
+                'amount': {
+                    'value': product["price"],
+                    'currency': 'RUB'
+                },
+                'vat_code': 1,
+                'quantity': 1
+            }
+        }
     }, id_key)
 
     return payment.confirmation.confirmation_url, payment.id
@@ -215,7 +241,7 @@ async def start_handler(message: Message):
     user = message.from_user
     add_user(user.id, user.username)
 
-    welcome_message = """
+    await message.answer("""
 🌟 *Добро пожаловать в бот для оплаты курса* 🌟
 
 *«Как встретить Свою любовь?»*  
@@ -224,9 +250,34 @@ async def start_handler(message: Message):
 > — © Джон Готтман
 
 Этот бот предназначен исключительно для оплаты курса. После успешной оплаты с вами свяжутся организаторы курса для предоставления доступа.
+    """, parse_mode="Markdown")
 
-Для продолжения поделитесь своим номером телефона:
-    """
+    await message.answer("""
+Для оформления покупки нам потребуется ваш *email*:
+▸ На этот адрес будет отправлен *электронный чек*
+▸ Email нужен только для финансовых документов
+▸ Данные защищены и не используются для рассылок
+
+🌟Пожалуйста, введите ваш email в формате:
+`example@mail.ru`
+    """, parse_mode="Markdown")
+
+
+@router.message(F.text)
+async def email_handler(message: Message):
+    email = message.text.strip()
+
+    if not EMAIL_REGEX.fullmatch(email):
+        await message.answer(
+            "❌ *Неверный формат email*\n\n"
+            "Пожалуйста, введите действительный email в формате:\n"
+            "`example@mail.ru`\n\n"
+            "Это необходимо для отправки чека о покупке.",
+            parse_mode="Markdown"
+        )
+        return
+
+    update_user_email(message.from_user.id, email)
 
     markup = ReplyKeyboardMarkup(
         keyboard=[
@@ -235,7 +286,12 @@ async def start_handler(message: Message):
         resize_keyboard=True
     )
 
-    await message.answer(welcome_message, reply_markup=markup, parse_mode="Markdown")
+    await message.answer(
+        "✅ *Email принят!*\n\n"
+        "Теперь поделитесь номером телефона для связи:",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
 
 
 @router.message(F.contact)
@@ -260,8 +316,8 @@ async def buy_handler(message: Message):
     user = message.from_user
 
     user_info = get_user_info(user.id)
-    if not user_info or not user_info[1]:
-        await message.answer("Сначала поделитесь номером телефона!")
+    if not user_info or not user_info[1] or not user_info[2]:
+        await message.answer("Сначала поделитесь *номером телефона* и *email*!", parse_mode='Markdown')
         return
 
     builder = InlineKeyboardBuilder()
@@ -283,12 +339,17 @@ async def product_selection_handler(callback: types.CallbackQuery):
     product_id = callback.data.split('_')[1]
     product = PRODUCTS.get(product_id)
 
+    user_id = callback.from_user.id
+
     if not product:
         await callback.answer("Товар не найден")
         return
 
-    payment_url, payment_id = create_payment(product_id, callback.message.chat.id)
-    add_payment(callback.from_user.id, payment_id, product["price"])
+    user_info = get_user_info(user_id)
+    user_phone_mail = {"email": user_info[2], "phone": user_info[1]}
+
+    payment_url, payment_id = create_payment(user_phone_mail, product_id, callback.message.chat.id)
+    add_payment(user_id, payment_id, product["price"])
 
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(
